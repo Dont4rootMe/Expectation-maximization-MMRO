@@ -312,7 +312,7 @@ class WordPositionAligner(WordAligner):
             # get prior probs of conections
             connections.append(self.translation_probs[src_trg_indx])
             # get and mult prior probs of positions
-            connections[i] *= self._get_probs_for_lengths(src, trg)
+            # connections[i] *= self._get_probs_for_lengths(src, trg)
             connections[i] /= np.sum(self.translation_probs[src_trg_indx], axis=0)
 
         return connections
@@ -332,7 +332,7 @@ class WordPositionAligner(WordAligner):
 
             # for each connection get log-probability
             src_trg_indx = np.ix_(src, trg)
-            log_probas = np.log(self._get_probs_for_lengths(src, trg) * self.translation_probs[src_trg_indx] + 1e-20)
+            log_probas = np.log(self.translation_probs[src_trg_indx] + 1e-20)
             log_inv_n = -np.log(len(src))
 
             # multiply posterior and log probas and sum over L_sum

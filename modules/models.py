@@ -288,13 +288,79 @@ class WordPositionAligner(WordAligner):
         Returns:
             probs_for_lengths: np.array with shape (src_length, tgt_length)
         """
-        pass
+        if (src_length, tgt_length) not in self.alignment_probs.keys():
+            self.alignment_probs[(src_length, tgt_length)] = np.full((src_length, tgt_length), 1 / src_length, dtype=np.float32)
+
+        return self.alignment_probs[(src_length, tgt_length)]
 
     def _e_step(self, parallel_corpus):
-        pass
+        # create matrix with probabilities
+        #      [count-sentences x sentence-source-words x sentence-target-words]
+        connections = []
+        
+        # iterate over each pair of sentences
+        for i, corp in enumerate(parallel_corpus):
+            # get tokens of each language in pair
+            src = corp.source_tokens
+            trg = corp.target_tokens
+
+            # for each connection get probability of aposterior token alignment in this position
+            #   acquire probability norm for each target word alignment
+            #   and then get each aposteory probability
+            src_trg_indx = np.ix_(src, trg)
+
+            # get prior probs of conections
+            connections.append(self.translation_probs[src_trg_indx])
+            # get and mult prior probs of positions
+            connections[i] *= self._get_probs_for_lengths(src, trg)
+            connections[i] /= np.sum(self.translation_probs[src_trg_indx], axis=0)
+
+        return connections
 
     def _compute_elbo(self, parallel_corpus, posteriors):
-        pass
+        # setting the sum over each sentece
+        L_sum = 0
+
+        # loop over each sentece
+        for i, corp in enumerate(parallel_corpus):
+            # get tokens of each language in pair
+            src = corp.source_tokens
+            trg = corp.target_tokens
+
+            # getting posterior probas for each token-alignments in sentence
+            q_i = posteriors[i]
+
+            # for each connection get log-probability
+            src_trg_indx = np.ix_(src, trg)
+            log_probas = np.log(self._get_probs_for_lengths(src, trg) * self.translation_probs[src_trg_indx] + 1e-20)
+            log_inv_n = -np.log(len(src))
+
+            # multiply posterior and log probas and sum over L_sum
+            L_sum += np.sum(q_i * log_probas)
+            # add prob_norm const
+            L_sum += len(trg) * log_inv_n
+            # add Fisher-Informative index
+            L_sum -= np.sum(q_i * np.log(q_i + 1e-20))
+
+        return L_sum
 
     def _m_step(self, parallel_corpus, posteriors):
-        pass
+        # pseudo-probas initialization
+        self.translation_probs.fill(0.0)
+        for value in self.alignment_probs.values():
+            value.fill(0.0)
+
+        # iteration over each sentence
+        for i, corp in enumerate(parallel_corpus):
+            # getting tokens of each sentence pair
+            src = corp.source_tokens
+            trg = corp.target_tokens
+
+            # acquire indexes and add sent-grad input to whole psp
+            src_trg_indx = np.ix_(src, trg)
+            np.add.at(self.translation_probs, src_trg_indx, posteriors[i])
+            self.alignment_probs[(src, trg)] += posteriors[i]
+
+        self.translation_probs /= np.sum(self.translation_probs, axis=1)[:, None]
+        
+        return self._compute_elbo(parallel_corpus, posteriors)

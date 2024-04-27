@@ -312,8 +312,8 @@ class WordPositionAligner(WordAligner):
             # get prior probs of conections
             connections.append(self.translation_probs[src_trg_indx])
             # get and mult prior probs of positions
-            # connections[i] *= self._get_probs_for_lengths(src, trg)
-            connections[i] /= np.sum(self.translation_probs[src_trg_indx], axis=0)
+            connections[i] *= self._get_probs_for_lengths(len(src), len(trg))
+            connections[i] /= np.sum(connections[i], axis=0)
 
         return connections
 
@@ -332,13 +332,10 @@ class WordPositionAligner(WordAligner):
 
             # for each connection get log-probability
             src_trg_indx = np.ix_(src, trg)
-            log_probas = np.log(self.translation_probs[src_trg_indx] + 1e-20)
-            log_inv_n = -np.log(len(src))
+            log_probas = np.log(self.translation_probs[src_trg_indx] + 1e-20) + np.log(self._get_probs_for_lengths(len(src), len(trg)) + 1e-20)
 
             # multiply posterior and log probas and sum over L_sum
             L_sum += np.sum(q_i * log_probas)
-            # add prob_norm const
-            L_sum += len(trg) * log_inv_n
             # add Fisher-Informative index
             L_sum -= np.sum(q_i * np.log(q_i + 1e-20))
 
@@ -359,8 +356,14 @@ class WordPositionAligner(WordAligner):
             # acquire indexes and add sent-grad input to whole psp
             src_trg_indx = np.ix_(src, trg)
             np.add.at(self.translation_probs, src_trg_indx, posteriors[i])
-            self.alignment_probs[(src, trg)] += posteriors[i]
+            
+            if (len(src), len(trg)) not in self.alignment_probs.keys():
+                self.alignment_probs[(len(src), len(trg))]  = posteriors[i]
+            else:
+                self.alignment_probs[(len(src), len(trg))] += posteriors[i]
 
         self.translation_probs /= np.sum(self.translation_probs, axis=1)[:, None]
+        for value in self.alignment_probs.values():
+            value /= np.sum(value, axis=0)[None, :]
         
         return self._compute_elbo(parallel_corpus, posteriors)
